@@ -67,7 +67,7 @@ bkg_color = cmap(0)
 
 def process_dat_files(number_of_frames, exp_time, working_folder,
                       docking_sites, NP_flag, pixel_size, pick_size, 
-                      radius_of_pick_to_average, th, plot_flag, verbose_flag):
+                      radius_of_pick_to_average, th, plot_flag, verbose_flag, photons_threshold, mask_level, mask_singles):
     
     print('\nStarting STEP 2.')
     
@@ -199,6 +199,18 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
     photon_intensity_all = np.array([])
     std_photons_all = np.array([])
     double_events_all = np.array([])
+
+    # Arrays for collecting kinetics data per site (using docking_sites parameter)
+    tons_per_site = {str(site): np.array([]) for site in range(docking_sites)}
+    toffs_per_site = {str(site): np.array([]) for site in range(docking_sites)}
+    tstarts_per_site = {str(site): np.array([]) for site in range(docking_sites)}
+    SNR_per_site = {str(site): np.array([]) for site in range(docking_sites)}
+    SBR_per_site = {str(site): np.array([]) for site in range(docking_sites)}
+    sum_photons_per_site = {str(site): np.array([]) for site in range(docking_sites)}
+    avg_photons_per_site = {str(site): np.array([]) for site in range(docking_sites)}
+    photon_intensity_per_site = {str(site): np.array([]) for site in range(docking_sites)}
+    std_photons_per_site = {str(site): np.array([]) for site in range(docking_sites)}
+    double_events_per_site = {str(site): np.array([]) for site in range(docking_sites)}
     
     # ================ HISTOGRAM CONFIGURATION ================
     # set number of bins for FINE histograming 
@@ -234,11 +246,9 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
         
         # Use calculate_tau_on_times_average to get averaged positions for binding events
         # Set parameters for binding event detection
-        photons_threshold = np.mean(photons_of_picked) * 0.1  # Simple threshold
+
         background_level = np.mean(bkg_of_picked)
-        mask_level = 1  # Simple masking
-        mask_singles = False
-        
+
         # Get averaged positions for binding events
         tau_results = calculate_tau_on_times_average(
             pick_trace, photons_threshold, background_level, exp_time,
@@ -500,638 +510,235 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
                     else:
                         all_traces_per_site[str(ranks[h])] = trace_no_zeros
             
-            # ================ SAVE TRACES PER SITE ================
-            for index, key in enumerate(all_traces_per_site_per_pick.keys()):
-                site_trace = all_traces_per_site_per_pick[key]
-                # Handle NaN values in distance matrix - set to 0 if NaN or not available
-                if not NP_flag:
-                    dist_value = 0
-                else:
-                    raw_dist = matrix_distance[0, index+1]
-                    dist_value = 0 if np.isnan(raw_dist) else round(raw_dist, 2)
-                new_filename = f'TRACE_pick_{i}_site_{int(key)}_dist_{dist_value}.dat'
-                new_filepath = os.path.join(traces_per_site_folder, new_filename)
-                np.savetxt(new_filepath, site_trace, fmt='%05d')
+            # ================ ASSIGN BINDING EVENTS TO SITES ================
+            # Now assign the already-calculated binding events to sites based on averaged positions
+            if tau_results[0] is not False and len(tau_results) >= 14:
+                # Extract binding event data
+                avg_x_positions = tau_results[12]  # average_x_positions
+                avg_y_positions = tau_results[13]  # average_y_positions
+                event_tons = tau_results[0]       # on times
+                event_toffs = tau_results[1]      # off times
+                event_tstarts = tau_results[3]    # start times
+                event_SNR = tau_results[4]        # signal to noise ratio
+                event_SBR = tau_results[5]        # signal to background ratio
+                event_sum_photons = tau_results[6]      # sum photons per event
+                event_avg_photons = tau_results[7]      # average photons per event
+                event_photon_intensity = tau_results[8] # photon intensities
+                event_std_photons = tau_results[9]      # std photons per event
+                event_double_events = tau_results[11]   # double events count
                 
-                # ================ CALCULATE PER-SITE KINETICS ================
-                # Calculate kinetics for this individual site
-                site_tau_results = calculate_tau_on_times_average(
-                    site_trace, photons_threshold, background_level, exp_time,
-                    mask_level, mask_singles, False, site_index
-                )
+                # Filter out NaN positions
+                valid_mask = ~(np.isnan(avg_x_positions) | np.isnan(avg_y_positions))
                 
-                if site_tau_results[0] is not False and len(site_tau_results) >= 14:
-                    # Extract and save per-site kinetics data
-                    site_tons = site_tau_results[0]
-                    site_toffs = site_tau_results[1] 
-                    site_sum_photons = site_tau_results[6]
-                    site_avg_photons = site_tau_results[7]
-                    site_photon_intensity = site_tau_results[8]
-                    site_std_photons = site_tau_results[9]
+                if np.any(valid_mask):
+                    valid_x = avg_x_positions[valid_mask]
+                    valid_y = avg_y_positions[valid_mask]
                     
-                    # Create per-site kinetics folders
-                    ton_per_site_folder = manage_save_directory(data_folder, 'ton_per_site')
-                    toff_per_site_folder = manage_save_directory(data_folder, 'toff_per_site')
-                    mean_photons_per_site_folder = manage_save_directory(data_folder, 'mean_photons_per_site')
-                    std_photons_per_site_folder = manage_save_directory(data_folder, 'std_photons_per_site')
-                    sum_photons_per_site_folder = manage_save_directory(data_folder, 'sum_photons_per_site')
-                    photons_per_site_folder = manage_save_directory(data_folder, 'photons_per_site')
+                    # For kinetics arrays, check if they have the same length as position arrays
+                    # If not, take only the first N elements where N = number of valid positions
+                    n_valid_positions = len(valid_x)
                     
-                    # Save per-site kinetics files
-                    # Ensure dist_value is valid for integer conversion
-                    safe_dist_value = 0 if np.isnan(dist_value) else int(dist_value)
-                    base_name = f'pick_{i}_site_{int(key)}_dist_{safe_dist_value}'
+                    # Safely get kinetics data - either filter by valid_mask or take first n_valid_positions
+                    if len(event_tons) == len(avg_x_positions):
+                        valid_tons = event_tons[valid_mask]
+                    else:
+                        valid_tons = event_tons[:n_valid_positions] if len(event_tons) >= n_valid_positions else event_tons
                     
-                    if len(site_tons) > 0:
-                        np.savetxt(os.path.join(ton_per_site_folder, f'ton_{base_name}.dat'), 
-                                  site_tons, fmt='%.3f')
-                    if len(site_toffs) > 0:
-                        np.savetxt(os.path.join(toff_per_site_folder, f'toff_{base_name}.dat'), 
-                                  site_toffs, fmt='%.3f')
-                    if len(site_avg_photons) > 0:
-                        np.savetxt(os.path.join(mean_photons_per_site_folder, f'meanphotons_{base_name}.dat'), 
-                                  site_avg_photons, fmt='%.3f')
-                    if len(site_std_photons) > 0:
-                        np.savetxt(os.path.join(std_photons_per_site_folder, f'stdphotons_{base_name}.dat'), 
-                                  site_std_photons, fmt='%.3f')
-                    if len(site_sum_photons) > 0:
-                        np.savetxt(os.path.join(sum_photons_per_site_folder, f'sumphotons_{base_name}.dat'), 
-                                  site_sum_photons, fmt='%.3f')
-                    if len(site_photon_intensity) > 0:
-                        np.savetxt(os.path.join(photons_per_site_folder, f'photons_{base_name}.dat'), 
-                                  site_photon_intensity, fmt='%.3f')
-        
-        # ================ COMPILE DATA FOR HISTOGRAMS ================
-        photons_concat = np.concatenate([photons_concat, photons_of_picked])
-        bkg_concat = np.concatenate([bkg_concat, bkg_of_picked])
-        frame_concat = np.concatenate([frame_concat, frame_of_picked])
-        locs_of_picked[i] = len(frame_of_picked)
-        
-        # ================ CREATE TIME HISTOGRAM ================
-        hist_range = [0, number_of_frames]
-        bin_size = (hist_range[-1] - hist_range[0])/number_of_bins
-        locs_of_picked_vs_time[i,:], bin_edges = np.histogram(
-            frame_of_picked, bins=number_of_bins, range=hist_range)
-        bin_centers = bin_edges[:-1] + bin_size/2
-        bin_centers_minutes = bin_centers*exp_time/60
-        
-        # ================ GENERATE PICK PLOTS ================
-        if plot_flag:
-            # Plot when the pick was bright vs time
-            plt.figure()
-            plt.step(bin_centers_minutes, locs_of_picked_vs_time[i,:], where='mid', label=f'Pick {i:04d}')
-            plt.xlabel('Time (min)')
-            plt.ylabel('Locs')
-            plt.ylim([0, 80])
-            ax = plt.gca()
-            ax.axvline(x=10, ymin=0, ymax=1, color='k', linewidth='2', linestyle='--')
-            ax.set_title(f'Number of locs per pick vs time. Bin size {bin_size*0.1/60:.1f} min')
-            aux_folder = manage_save_directory(figures_per_pick_folder, 'locs_vs_time_per_pick')
-            figure_name = f'locs_per_pick_vs_time_pick_{i:02d}'
-            figure_path = os.path.join(aux_folder, f'{figure_name}.png')
-            plt.savefig(figure_path, dpi=100, bbox_inches='tight')
-            plt.close()
-            
-            # ================ PLOT SCATTER WITH NP ================
-            if peaks_flag:
-                # RAW scatter plot
-                plt.figure(100)
-                plt.scatter(x_position_of_picked, y_position_of_picked, color='C0', label='Fluorophore Emission', s=0.5)
-                
-                if NP_flag:
-                    plt.scatter(x_position_of_picked_NP, y_position_of_picked_NP, color='C1', s=0.5, alpha=0.2)
-                    plt.scatter(x_avg_NP, y_avg_NP, color='C1', label='NP Scattering', s=0.5, alpha=1)
-                    plt.plot(x_avg_NP, y_avg_NP, 'x', color='k', label='Center of NP')
-                    plt.legend(loc='upper left')
-                
-                plt.ylabel(r'y ($\mu$m)')
-                plt.xlabel(r'x ($\mu$m)')
-                plt.xlim(left=0)
-                plt.ylim(bottom=0)
-                plt.axis('square')
-                ax = plt.gca()
-                ax.set_title(f'Position of locs per pick. Pick {i:02d}')
-                aux_folder = manage_save_directory(figures_per_pick_folder, 'scatter_plots')
-                figure_name = f'xy_pick_scatter_NP_and_PAINT_{i:02d}'
-                figure_path = os.path.join(aux_folder, f'{figure_name}.png')
-                plt.savefig(figure_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                
-                # ================ PLOT SCATTER WITH PAINT POINTS ================
-                plt.figure(2)
-                plt.plot(x_position_of_picked, y_position_of_picked, '.', color='C0', label='PAINT', linewidth=0.5)
-                
-                if NP_flag:
-                    plt.plot(x_avg_NP, y_avg_NP, 'o', markersize=10, markerfacecolor='C1', 
-                            markeredgecolor='k', label='NP')
-                    plt.legend(loc='upper left')
-                
-                plt.ylabel(r'y ($\mu$m)')
-                plt.xlabel(r'x ($\mu$m)')
-                plt.axis('square')
-                ax = plt.gca()
-                ax.set_title(f'Position of locs per pick. Pick {i:02d}')
-                aux_folder = manage_save_directory(figures_per_pick_folder, 'scatter_plots')
-                figure_name = f'xy_pick_scatter_PAINT_{i:02d}'
-                figure_path = os.path.join(aux_folder, f'{figure_name}.png')
-                plt.savefig(figure_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                
-                # ================ PLOT FINE 2D IMAGE ================
-                plt.figure(3)
-                plt.imshow(z_hist, interpolation='none', origin='lower',
-                          extent=[x_hist_centers[0], x_hist_centers[-1], 
-                                  y_hist_centers[0], y_hist_centers[-1]])
-                ax = plt.gca()
-                ax.set_facecolor(bkg_color)
-                
-                if total_peaks_found > 0:
-                    peak_x = [coord[0] for coord in peak_coords]
-                    peak_y = [coord[1] for coord in peak_coords]
-                    plt.plot(peak_x, peak_y, 'x', markersize=9, 
-                            color='white', markeredgecolor='black', mew=1, label='binding sites')
+                    if len(event_toffs) == len(avg_x_positions):
+                        valid_toffs = event_toffs[valid_mask]
+                    else:
+                        valid_toffs = event_toffs[:n_valid_positions] if len(event_toffs) >= n_valid_positions else event_toffs
                     
-                    for k, (circle_x, circle_y) in enumerate(peak_coords):
-                        circ = plot_circle((circle_x, circle_y), radius=analysis_radius, 
-                                          facecolor='none', edgecolor='white', linewidth=1)
-                        ax.add_patch(circ)
+                    if len(event_tstarts) == len(avg_x_positions):
+                        valid_tstarts = event_tstarts[valid_mask]
+                    else:
+                        valid_tstarts = event_tstarts[:n_valid_positions] if len(event_tstarts) >= n_valid_positions else event_tstarts
+                    
+                    if len(event_SNR) == len(avg_x_positions):
+                        valid_SNR = event_SNR[valid_mask]
+                    else:
+                        valid_SNR = event_SNR[:n_valid_positions] if len(event_SNR) >= n_valid_positions else event_SNR
+                    
+                    if len(event_SBR) == len(avg_x_positions):
+                        valid_SBR = event_SBR[valid_mask]
+                    else:
+                        valid_SBR = event_SBR[:n_valid_positions] if len(event_SBR) >= n_valid_positions else event_SBR
+                    
+                    if len(event_sum_photons) == len(avg_x_positions):
+                        valid_sum_photons = event_sum_photons[valid_mask]
+                    else:
+                        valid_sum_photons = event_sum_photons[:n_valid_positions] if len(event_sum_photons) >= n_valid_positions else event_sum_photons
+                    
+                    if len(event_avg_photons) == len(avg_x_positions):
+                        valid_avg_photons = event_avg_photons[valid_mask]
+                    else:
+                        valid_avg_photons = event_avg_photons[:n_valid_positions] if len(event_avg_photons) >= n_valid_positions else event_avg_photons
+                    
+                    if len(event_photon_intensity) == len(avg_x_positions):
+                        valid_photon_intensity = event_photon_intensity[valid_mask]
+                    else:
+                        valid_photon_intensity = event_photon_intensity[:n_valid_positions] if len(event_photon_intensity) >= n_valid_positions else event_photon_intensity
+                    
+                    if len(event_std_photons) == len(avg_x_positions):
+                        valid_std_photons = event_std_photons[valid_mask]
+                    else:
+                        valid_std_photons = event_std_photons[:n_valid_positions] if len(event_std_photons) >= n_valid_positions else event_std_photons
+                    
+                    if len(event_double_events) == len(avg_x_positions):
+                        valid_double_events = event_double_events[valid_mask]
+                    else:
+                        valid_double_events = event_double_events[:n_valid_positions] if len(event_double_events) >= n_valid_positions else event_double_events
+                    
+                    # Ensure all arrays have the same length (take minimum to be safe)
+                    min_length = min(len(valid_x), len(valid_tons), len(valid_toffs), len(valid_tstarts), 
+                                   len(valid_SNR), len(valid_SBR), len(valid_sum_photons), 
+                                   len(valid_avg_photons), len(valid_photon_intensity), 
+                                   len(valid_std_photons), len(valid_double_events))
+                    
+                    # Truncate all arrays to the minimum length
+                    valid_x = valid_x[:min_length]
+                    valid_y = valid_y[:min_length]
+                    valid_tons = valid_tons[:min_length]
+                    valid_toffs = valid_toffs[:min_length]
+                    valid_tstarts = valid_tstarts[:min_length]
+                    valid_SNR = valid_SNR[:min_length]
+                    valid_SBR = valid_SBR[:min_length]
+                    valid_sum_photons = valid_sum_photons[:min_length]
+                    valid_avg_photons = valid_avg_photons[:min_length]
+                    valid_photon_intensity = valid_photon_intensity[:min_length]
+                    valid_std_photons = valid_std_photons[:min_length]
+                    valid_double_events = valid_double_events[:min_length]
+                    
+                    # First, add all valid binding events to overall arrays
+                    tons_all = np.append(tons_all, valid_tons)
+                    toffs_all = np.append(toffs_all, valid_toffs)
+                    tstarts_all = np.append(tstarts_all, valid_tstarts)
+                    SNR_all = np.append(SNR_all, valid_SNR)
+                    SBR_all = np.append(SBR_all, valid_SBR)
+                    sum_photons_all = np.append(sum_photons_all, valid_sum_photons)
+                    avg_photons_all = np.append(avg_photons_all, valid_avg_photons)
+                    photon_intensity_all = np.append(photon_intensity_all, valid_photon_intensity)
+                    std_photons_all = np.append(std_photons_all, valid_std_photons)
+                    double_events_all = np.append(double_events_all, valid_double_events)
+                    
+                    # Then assign each binding event to the nearest detected peak
+                    for event_idx in range(len(valid_x)):
+                        event_x = valid_x[event_idx]
+                        event_y = valid_y[event_idx]
                         
-                        # Peak labels  
-                        label_x = circle_x + analysis_radius*1.25
-                        label_y = circle_y + analysis_radius*0.25
-                        text_content = f"{k}"
-                        ax.text(label_x, label_y, text_content, ha='center', va='center', 
-                               rotation=0, fontsize=12, color='white')
-                
-                if NP_flag and x_avg_NP is not None:
-                    plt.plot(x_avg_NP, y_avg_NP, 'o', markersize=8, markerfacecolor='C1', 
-                            markeredgecolor='white', label='NP')
-                    plt.legend(loc='upper right')
-                
-                plt.ylabel(r'y ($\mu$m)')
-                plt.xlabel(r'x ($\mu$m)')
-                cbar = plt.colorbar()
-                cbar.ax.set_title(u'Locs', fontsize=16)
-                cbar.ax.tick_params(labelsize=16)
-                ax.set_title(f'Pick {i:02d}', fontsize=10)
-                aux_folder = manage_save_directory(figures_per_pick_folder, 'image_FINE')
-                figure_name = f'xy_pick_image_PAINT_{i:02d}'
-                figure_path = os.path.join(aux_folder, f'{figure_name}.png')
-                plt.savefig(figure_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                
-                # ================ PLOT PEAK DETECTION PROCESS ================
-                if total_peaks_found > 0:
-                    # Use the auxiliary function to get histogram data (same logic as detect_peaks_improved)
-                    z_hist_smooth_detect, x_centers_detect, y_centers_detect = get_peak_detection_histogram(
-                        x_position_of_picked, y_position_of_picked, hist_bounds
-                    )
-                    
-                    plt.figure(5)
-                    plt.imshow(z_hist_smooth_detect, interpolation='none', origin='lower',
-                              extent=[x_centers_detect[0], x_centers_detect[-1], 
-                                      y_centers_detect[0], y_centers_detect[-1]], 
-                              cmap='viridis')
-                    ax = plt.gca()
-                    ax.set_facecolor(bkg_color)
-                    
-                    # Show detected peaks as red circles
-                    peak_x = [coord[0] for coord in peak_coords]
-                    peak_y = [coord[1] for coord in peak_coords]
-                    plt.scatter(peak_x, peak_y, c='red', s=150, marker='o', 
-                              edgecolors='white', linewidths=2, label=f'{total_peaks_found} detected peaks')
-                    
-                    # Add peak numbers
-                    for k, (px, py) in enumerate(peak_coords):
-                        ax.text(px, py, f'{k}', ha='center', va='center', 
-                               fontsize=10, color='white', fontweight='bold')
-                    
-                    if NP_flag and x_avg_NP is not None:
-                        plt.plot(x_avg_NP, y_avg_NP, 's', markersize=10, markerfacecolor='yellow', 
-                                markeredgecolor='black', label='NP')
-                    
-                    plt.legend(loc='upper right')
-                    plt.ylabel(r'y ($\mu$m)')
-                    plt.xlabel(r'x ($\mu$m)')
-                    cbar = plt.colorbar()
-                    cbar.ax.set_title(u'Density')
-                    cbar.ax.tick_params()
-                    ax.set_title(f'Peak detection - Pick {i:02d}', fontsize=10)
-                    aux_folder = manage_save_directory(figures_per_pick_folder, 'image_peak_detection')
-                    figure_name = f'peak_detection_process_{i:02d}'
-                    figure_path = os.path.join(aux_folder, f'{figure_name}.png')
-                    plt.savefig(figure_path, dpi=300, bbox_inches='tight')
-                    plt.close()
-                
-                # ================ PLOT DISTANCE MATRICES ================
-                if len(cm_binding_sites_x) > 1:
-                    # Matrix distance plot
-                    plt.figure(10)
-                    plt.imshow(matrix_distance, interpolation='none', cmap='spring')
-                    ax = plt.gca()
-                    
-                    for l in range(matrix_distance.shape[0]):
-                        for m in range(matrix_distance.shape[1]):
-                            if l == m:
-                                ax.text(m, l, '-', ha="center", va="center", color=[0,0,0], fontsize=18)
-                            else:
-                                ax.text(m, l, '%.0f' % matrix_distance[l, m],
-                                       ha="center", va="center", color=[0,0,0], fontsize=18)
-                    
-                    ax.xaxis.tick_top()
-                    ax.set_xticks(np.array(range(matrix_distance.shape[1])))
-                    ax.set_yticks(np.array(range(matrix_distance.shape[0])))
-                    axis_string = ['NP']
-                    for j in range(total_peaks_found):
-                        axis_string.append(f'Site {j+1}')
-                    ax.set_xticklabels(axis_string)
-                    ax.set_yticklabels(axis_string)
-                    aux_folder = manage_save_directory(figures_per_pick_folder, 'matrix_distance')
-                    figure_name = f'matrix_distance_{i:02d}'
-                    figure_path = os.path.join(aux_folder, f'{figure_name}.png')
-                    plt.savefig(figure_path, dpi=100, bbox_inches='tight')
-                    plt.close()
-                    
-                    # Matrix std dev plot
-                    plt.figure(11)
-                    plt.imshow(matrix_std_dev, interpolation='none', cmap='spring')
-                    ax = plt.gca()
-                    
-                    for l in range(matrix_distance.shape[0]):
-                        for m in range(matrix_distance.shape[1]):
-                            if l != m:
-                                ax.text(m, l, '-', ha="center", va="center", color=[0,0,0], fontsize=18)
-                            else:
-                                ax.text(m, l, '%.0f' % matrix_std_dev[l, m],
-                                       ha="center", va="center", color=[0,0,0], fontsize=18)
-                    
-                    ax.xaxis.tick_top()
-                    ax.set_xticks(np.array(range(matrix_distance.shape[1])))
-                    ax.set_yticks(np.array(range(matrix_distance.shape[0])))
-                    axis_string = ['NP']
-                    for j in range(total_peaks_found):
-                        axis_string.append(f'Site {j+1}')
-                    ax.set_xticklabels(axis_string)
-                    ax.set_yticklabels(axis_string)
-                    aux_folder = manage_save_directory(figures_per_pick_folder, 'matrix_std_dev')
-                    figure_name = f'matrix_std_dev_{i:02d}'
-                    figure_path = os.path.join(aux_folder, f'{figure_name}.png')
-                    plt.savefig(figure_path, dpi=100, bbox_inches='tight')
-                    plt.close()
-
-        # ================ COLLECT KINETICS DATA ================
-        # Collect kinetics data from tau_results for overall analysis
-        if tau_results[0] is not False and len(tau_results) >= 14:
-            # Extract kinetics data from tau_results
-            tons_pick = tau_results[0]    # on times
-            toffs_pick = tau_results[1]   # off times
-            tstarts_pick = tau_results[3] # start times
-            SNR_pick = tau_results[4]     # signal to noise ratio
-            SBR_pick = tau_results[5]     # signal to background ratio
-            sum_photons_pick = tau_results[6]      # sum photons per event
-            avg_photons_pick = tau_results[7]      # average photons per event
-            photon_intensity_pick = tau_results[8] # photon intensities
-            std_photons_pick = tau_results[9]      # std photons per event
-            double_events_pick = tau_results[11]   # double events count
+                        # Find nearest peak
+                        min_distance = float('inf')
+                        nearest_site = -1
+                        
+                        for peak_idx in range(total_peaks_found):
+                            peak_x, peak_y = peak_coords[peak_idx]
+                            distance = np.sqrt((event_x - peak_x)**2 + (event_y - peak_y)**2)
+                            
+                            if distance < min_distance and distance < analysis_radius:
+                                min_distance = distance
+                                nearest_site = peak_idx
+                        
+                        # Assign event to site if within analysis radius
+                        if nearest_site >= 0:
+                            site_rank = str(ranks[nearest_site])
+                            
+                            # Add to per-site arrays
+                            if site_rank in tons_per_site:
+                                tons_per_site[site_rank] = np.append(tons_per_site[site_rank], valid_tons[event_idx])
+                                toffs_per_site[site_rank] = np.append(toffs_per_site[site_rank], valid_toffs[event_idx])
+                                tstarts_per_site[site_rank] = np.append(tstarts_per_site[site_rank], valid_tstarts[event_idx])
+                                SNR_per_site[site_rank] = np.append(SNR_per_site[site_rank], valid_SNR[event_idx])
+                                SBR_per_site[site_rank] = np.append(SBR_per_site[site_rank], valid_SBR[event_idx])
+                                sum_photons_per_site[site_rank] = np.append(sum_photons_per_site[site_rank], valid_sum_photons[event_idx])
+                                avg_photons_per_site[site_rank] = np.append(avg_photons_per_site[site_rank], valid_avg_photons[event_idx])
+                                photon_intensity_per_site[site_rank] = np.append(photon_intensity_per_site[site_rank], valid_photon_intensity[event_idx])
+                                std_photons_per_site[site_rank] = np.append(std_photons_per_site[site_rank], valid_std_photons[event_idx])
+                                double_events_per_site[site_rank] = np.append(double_events_per_site[site_rank], valid_double_events[event_idx])
+    
+    # ================ SAVE OVERALL KINETICS DATA TO FILES ================
+    # After all picks are processed, save the overall kinetics data first
+    print(f"\n📊 Saving overall kinetics data...")
+    
+    # Save overall t_on and t_off data
+    if len(tons_all) > 0:
+        ton_filepath = os.path.join(kinetics_folder, 't_on.dat')
+        np.savetxt(ton_filepath, tons_all, fmt='%.3f')
+        
+        toff_filepath = os.path.join(kinetics_folder, 't_off.dat')
+        np.savetxt(toff_filepath, toffs_all, fmt='%.3f')
+        
+        # Save other overall kinetics parameters
+        tstarts_filepath = os.path.join(kinetics_folder, 't_starts.dat')
+        np.savetxt(tstarts_filepath, tstarts_all, fmt='%.3f')
+        
+        SNR_filepath = os.path.join(kinetics_folder, 'SNR.dat')
+        np.savetxt(SNR_filepath, SNR_all, fmt='%.3f')
+        
+        SBR_filepath = os.path.join(kinetics_folder, 'SBR.dat')
+        np.savetxt(SBR_filepath, SBR_all, fmt='%.3f')
+        
+        sum_photons_filepath = os.path.join(kinetics_folder, 'sum_photons.dat')
+        np.savetxt(sum_photons_filepath, sum_photons_all, fmt='%.3f')
+        
+        avg_photons_filepath = os.path.join(kinetics_folder, 'avg_photons.dat')
+        np.savetxt(avg_photons_filepath, avg_photons_all, fmt='%.3f')
+        
+        print(f"✅ Overall kinetics data saved: {len(tons_all):,} events")
+        print(f"   t_on.dat: {ton_filepath}")
+        print(f"   t_off.dat: {toff_filepath}")
+    else:
+        print("⚠️  No overall kinetics data to save!")
+    
+    # ================ SAVE PER-SITE KINETICS DATA TO FILES ================
+    # After all picks are processed, save the collected per-site data
+    print(f"\n📊 Saving per-site kinetics data...")
+    
+    # Create per-site combined folder in kinetics_data
+    per_site_combined_folder = manage_save_directory(kinetics_folder, 'per_site_combined')
+    
+    # Save data for each site
+    for site_rank in tons_per_site.keys():
+        if len(tons_per_site[site_rank]) > 0:
+            # Save t_on data
+            ton_filename = f't_on_site_{site_rank}.dat'
+            ton_filepath = os.path.join(per_site_combined_folder, ton_filename)
+            np.savetxt(ton_filepath, tons_per_site[site_rank], fmt='%.3f')
             
-            # Append to global arrays (will be initialized before the loop)
-            if len(tons_pick) > 0:  # Only append if there are valid events
-                tons_all = np.append(tons_all, tons_pick)
-                toffs_all = np.append(toffs_all, toffs_pick)
-                tstarts_all = np.append(tstarts_all, tstarts_pick)
-                SNR_all = np.append(SNR_all, SNR_pick)
-                SBR_all = np.append(SBR_all, SBR_pick)
-                sum_photons_all = np.append(sum_photons_all, sum_photons_pick)
-                avg_photons_all = np.append(avg_photons_all, avg_photons_pick)
-                photon_intensity_all = np.append(photon_intensity_all, photon_intensity_pick)
-                std_photons_all = np.append(std_photons_all, std_photons_pick)
-                double_events_all = np.append(double_events_all, double_events_pick)
-
-    # ================ GLOBAL ANALYSIS AND VISUALIZATION ================
-    # ================ PLOT NP RELATIVE POSITIONS ================
-    number_of_bins = 16
-    hist_range = [25, 160]
-    bin_size = (hist_range[-1] - hist_range[0])/number_of_bins
-    position_bins, bin_edges = np.histogram(positions_concat_NP, bins = number_of_bins, \
-                                            range = hist_range)
-    bin_centers = bin_edges[:-1] + bin_size/2
-    plt.figure()
-    plt.bar(bin_centers, position_bins, width = 0.8*bin_size, align = 'center')
-    plt.xlabel('Position (nm)')
-    plt.ylabel('Counts')
-    figure_name = 'relative_positions_NP_sites'
-    figure_path = os.path.join(figures_folder, '%s.png' % figure_name)
-    plt.savefig(figure_path, dpi = 300, bbox_inches='tight')
+            # Save t_off data  
+            toff_filename = f't_off_site_{site_rank}.dat'
+            toff_filepath = os.path.join(per_site_combined_folder, toff_filename)
+            np.savetxt(toff_filepath, toffs_per_site[site_rank], fmt='%.3f')
+            
+            # Save other kinetics parameters
+            tstarts_filename = f't_starts_site_{site_rank}.dat'
+            tstarts_filepath = os.path.join(per_site_combined_folder, tstarts_filename)
+            np.savetxt(tstarts_filepath, tstarts_per_site[site_rank], fmt='%.3f')
+            
+            SNR_filename = f'SNR_site_{site_rank}.dat'
+            SNR_filepath = os.path.join(per_site_combined_folder, SNR_filename)
+            np.savetxt(SNR_filepath, SNR_per_site[site_rank], fmt='%.3f')
+            
+            SBR_filename = f'SBR_site_{site_rank}.dat'
+            SBR_filepath = os.path.join(per_site_combined_folder, SBR_filename)
+            np.savetxt(SBR_filepath, SBR_per_site[site_rank], fmt='%.3f')
+            
+            sum_photons_filename = f'sum_photons_site_{site_rank}.dat'
+            sum_photons_filepath = os.path.join(per_site_combined_folder, sum_photons_filename)
+            np.savetxt(sum_photons_filepath, sum_photons_per_site[site_rank], fmt='%.3f')
+            
+            avg_photons_filename = f'avg_photons_site_{site_rank}.dat'
+            avg_photons_filepath = os.path.join(per_site_combined_folder, avg_photons_filename)
+            np.savetxt(avg_photons_filepath, avg_photons_per_site[site_rank], fmt='%.3f')
+            
+            if verbose_flag:
+                print(f"   Site {site_rank}: {len(tons_per_site[site_rank]):,} events saved")
+        else:
+            if verbose_flag:
+                print(f"   Site {site_rank}: No events to save (empty)")
+    
+    print(f"✅ Per-site data saved to: {per_site_combined_folder}")
+    
     plt.close()
-    
-    # ================ PLOT BINDING SITE RELATIVE POSITIONS ================
-    number_of_bins = 16
-    hist_range = [25, 160]
-    bin_size = (hist_range[-1] - hist_range[0])/number_of_bins
-    #print('\nRelative position between binding sites bin size', bin_size)
-    position_bins, bin_edges = np.histogram(positions_concat_origami, bins = number_of_bins, \
-                                            range = hist_range)
-    bin_centers = bin_edges[:-1] + bin_size/2
-    plt.figure()
-    plt.bar(bin_centers, position_bins, width = 0.8*bin_size, align = 'center')
-    plt.xlabel('Position (nm)')
-    plt.ylabel('Counts')
-    figure_name = 'relative_positions_binding_sites'
-    figure_path = os.path.join(figures_folder, '%s.png' % figure_name)
-    plt.savefig(figure_path, dpi = 300, bbox_inches='tight')
-    plt.close()
-    
-    # ================ PLOT GLOBAL TIME SERIES ANALYSIS ================
-    # plot global variables, all the picks of the video
-    time_concat = frame_concat*exp_time/60
-    
-    ## LOCS
-    sum_of_locs_of_picked_vs_time = np.sum(locs_of_picked_vs_time, axis=0)
-    plt.figure()
-    plt.step(bin_centers_minutes, sum_of_locs_of_picked_vs_time, where = 'mid')
-    plt.xlabel('Time (min)')
-    plt.ylabel('Locs')
-    x_limit = [0, total_time_min]
-    plt.xlim(x_limit)
-    ax = plt.gca()
-    ax.set_title('Sum of localizations vs time. Binning time %d s. %d picks. ' \
-                 % ((bin_size*0.1), total_number_of_picks))
-    figure_name = 'locs_vs_time_all'
-    figure_path = os.path.join(figures_folder, '%s.png' % figure_name)
-    plt.savefig(figure_path, dpi = 300, bbox_inches='tight')
-    plt.close()
-
-    # ================ PROCESS TIME DATA ================
-    # Sorting time.
-    index_concat = np.argsort(time_concat)
-    ordered_time_concat = time_concat[index_concat]
-
-    # Print the sum of the photons.
-    photons_sum = np.sum(photons_concat, axis=None)
-    photons_mean = np.mean(photons_concat, axis=None)
-
-    # ================ SAVE KINETICS DATA ================
-    new_filename = 'PHOTONS.dat'
-    new_filepath = os.path.join(kinetics_folder, new_filename)
-    np.savetxt(new_filepath, photons_concat)
-
-    new_filename = 'TIME.dat'
-    new_filepath = os.path.join(kinetics_folder, new_filename)
-    np.savetxt(new_filepath, time_concat)
-
-    # ================ PLOT BACKGROUND SIGNAL ================
-    ## BACKGROUND
-    ax = plot_vs_time_with_hist(bkg_concat, time_concat, order = 2)
-    ax.set_xlabel('Time (min)')
-    ax.set_ylabel('Total background [photons]')
-    ax.set_title('Total background received vs time.')
-    figure_name = 'bkg_vs_time'
-    figure_path = os.path.join(figures_folder, '%s.png' % figure_name)
-    plt.savefig(figure_path, dpi = 300, bbox_inches='tight')
-    plt.close()
-
-    # ================ PLOT SITE-SPECIFIC PHOTON DISTRIBUTIONS ================
-    # Sort the keys to ensure plotting in numerical order
-    keys = sorted(all_traces_per_site.keys(), key=float)
-
-    # Custom colors and line styles for better distinction
-    colors = ['red', 'green', 'blue', 'purple', 'orange', 'black', 'gray']
-    line_styles = ['-']*10
-
-    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
-
-    try:
-        global_min = min([data.min() for data in all_traces_per_site.values()])
-        global_max = max([data.max() for data in all_traces_per_site.values()])
-
-        x_lim_lower = global_min - 1
-        x_lim_upper = global_max + 1
-
-        for key, color, line_style in zip(keys, colors, line_styles):
-            data = all_traces_per_site[key]
-            bins = int(np.ceil(np.sqrt(len(data))))
-            print(key, len(data))
-            ax.hist(data, bins=bins, label=f'{key}', histtype='step', density=False, color=color, linestyle=line_style,
-                    linewidth=1, alpha=0.6)
-
-        ax.set_xlim(x_lim_lower, x_lim_upper)
-        ax.set_xlabel("Photons", fontsize=24)
-        ax.set_ylabel("Counts", fontsize=24)
-        plt.xticks(fontsize=20)
-        plt.yticks(fontsize=20)
-        ax.legend(title='Binding site')
-        ax.set_title("Binding site photon distributions", fontsize=24)
-        plt.tight_layout()
-        figure_name = 'binding_site_photon_distributions'
-        figure_path = os.path.join(figures_folder, '%s.png' % figure_name)
-        plt.savefig(figure_path, dpi=300, bbox_inches='tight')
-        plt.close()
-    except:
-        pass
-
-    # ================ KINETICS ANALYSIS AND PLOTTING ================
-    # Process and plot kinetics data collected from all picks
-    if len(tons_all) > 0:
-        # Clean up kinetics data
-        tons_all = np.trim_zeros(tons_all)
-        toffs_all = np.trim_zeros(toffs_all)
-        
-        # Filter out invalid SNR/SBR values
-        filter_indices = np.logical_and.reduce((
-            ~np.isnan(SNR_all), ~np.isnan(SBR_all),
-            ~np.isinf(SNR_all), ~np.isinf(SBR_all)
-        ))
-        SNR_filtered = SNR_all[filter_indices]
-        SBR_filtered = SBR_all[filter_indices]
-        tstarts_filtered = tstarts_all[filter_indices]
-        
-        # ================ SAVE KINETICS DATA ================
-        # Save kinetics data files for Step 4 compatibility
-        np.savetxt(os.path.join(kinetics_folder, 't_on.dat'), tons_all, fmt='%.3f')
-        np.savetxt(os.path.join(kinetics_folder, 't_off.dat'), toffs_all, fmt='%.3f')
-        np.savetxt(os.path.join(kinetics_folder, 't_start.dat'), tstarts_all, fmt='%.3f')
-        np.savetxt(os.path.join(kinetics_folder, 'snr.dat'), SNR_filtered, fmt='%.3f')
-        np.savetxt(os.path.join(kinetics_folder, 'sbr.dat'), SBR_filtered, fmt='%.3f')
-        np.savetxt(os.path.join(kinetics_folder, 'sum_photons.dat'), sum_photons_all, fmt='%.3f')
-        np.savetxt(os.path.join(kinetics_folder, 'avg_photons.dat'), avg_photons_all, fmt='%.3f')
-        np.savetxt(os.path.join(kinetics_folder, 'std_photons.dat'), std_photons_all, fmt='%.3f')
-        np.savetxt(os.path.join(kinetics_folder, 'double_events.dat'), double_events_all, fmt='%.3f')
-        
-        # ================ KINETICS PLOTS ================
-        # Plot binding time vs start time
-        plt.figure()
-        ax, slope, intercept = plot_vs_time_with_hist(tons_all, tstarts_all/60, order=1, fit_line=True)
-        ax.set_xlabel('Time [min]')
-        ax.set_ylabel('Binding time [s]')
-        ax.set_title(f'Binding time vs. start time\nSlope: {slope:.3f}, Intercept: {intercept:.3f}')
-        figure_path = os.path.join(figures_folder, 'binding_time_vs_time.png')
-        plt.savefig(figure_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # Plot total photons vs time
-        plt.figure()
-        ax = plot_vs_time_with_hist(sum_photons_all, tstarts_all/60)
-        ax.set_xlabel('Time [min]')
-        ax.set_ylabel('Total photons [photons]')
-        ax.set_title('Total photons per binding event vs time')
-        figure_path = os.path.join(figures_folder, 'total_photons_vs_time.png')
-        plt.savefig(figure_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # Photon count histogram
-        plt.figure()
-        bin_edges = np.histogram_bin_edges(sum_photons_all, 'fd')
-        plt.hist(sum_photons_all, bins=bin_edges)
-        plt.xlabel('Photon count [photons]')
-        plt.ylabel('Frequency')
-        plt.title('Histogram of photon count per binding event')
-        plt.yscale('log')
-        figure_path = os.path.join(figures_folder, 'photon_histogram.png')
-        plt.savefig(figure_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # Standard deviation histogram
-        if len(std_photons_all) > 0:
-            plt.figure()
-            bin_edges = np.histogram_bin_edges(std_photons_all, 'fd')
-            plt.hist(std_photons_all, bins=bin_edges)
-            plt.xlabel('Standard deviation [photons]')
-            plt.ylabel('Frequency')
-            plt.title('Histogram of photon standard deviation per binding event')
-            plt.yscale('log')
-            figure_path = os.path.join(figures_folder, 'std_photons_histogram.png')
-            plt.savefig(figure_path, dpi=300, bbox_inches='tight')
-            plt.close()
-        
-        # SNR and SBR scatter plot
-        if len(SNR_filtered) > 0:
-            plt.figure()
-            plt.scatter(tstarts_filtered/60, SNR_filtered, s=0.85, alpha=0.6, label='SNR')
-            plt.scatter(tstarts_filtered/60, SBR_filtered, s=0.85, alpha=0.6, label='SBR')
-            plt.yscale('log')
-            plt.xlabel('Time [min]')
-            plt.ylabel('SNR / SBR')
-            plt.title('Signal-to-Noise and Signal-to-Background Ratios vs Time')
-            plt.legend()
-            figure_path = os.path.join(figures_folder, 'SNR_SBR_scatter_plot.png')
-            plt.savefig(figure_path, dpi=300, bbox_inches='tight')
-            plt.close()
-        
-        # Update summary with kinetics data
-        kinetics_summary = {
-            'Total Binding Events': len(tons_all),
-            'Mean Binding Time (s)': np.mean(tons_all),
-            'Mean Unbinding Time (s)': np.mean(toffs_all) if len(toffs_all) > 0 else 0,
-            'Mean SNR': np.mean(SNR_filtered) if len(SNR_filtered) > 0 else 0,
-            'Mean SBR': np.mean(SBR_filtered) if len(SBR_filtered) > 0 else 0,
-            'Binding Time Slope': slope if 'slope' in locals() else 0,
-            'Binding Time Intercept': intercept if 'intercept' in locals() else 0
-        }
-        
-        for key, value in kinetics_summary.items():
-            update_pkl(main_folder, key, value)
-
-    # ================ SAVE BACKGROUND DATA ================
-    new_filename = 'BKG.dat'
-    new_filepath = os.path.join(kinetics_folder, new_filename)
-    np.savetxt(new_filepath, bkg_concat, fmt='%05d')
-    
-    # ================ SAVE ALL TRACES ================
-    # delete first fake and empty trace (needed to make the proper array)
-    all_traces = np.delete(all_traces, 0, axis = 0)
-    all_traces = all_traces.T
-    # save ALL traces in one file
-
-    new_filename = 'TRACES_ALL.dat'
-    new_filepath = os.path.join(kinetics_folder, new_filename)
-    np.savetxt(new_filepath, all_traces, fmt='%05d')
-
-    # ================ SAVE ADDITIONAL DATA ================
-    # number of locs
-    data_to_save = np.asarray([pick_number, locs_of_picked]).T
-    new_filename = 'number_of_locs_per_pick.dat'
-    new_filepath = os.path.join(data_folder, new_filename)
-    np.savetxt(new_filepath, data_to_save, fmt='%i')
-    
-    # relative positions
-    data_to_save = positions_concat_NP
-    new_filename = 'relative_positions_NP_sites_in_nm.dat'
-    new_filepath = os.path.join(data_folder, new_filename)
-    np.savetxt(new_filepath, data_to_save, fmt='%.1f')
-    data_to_save = positions_concat_origami
-    new_filename = 'relative_positions_binding_sites_in_nm.dat'
-    new_filepath = os.path.join(data_folder, new_filename)
-    np.savetxt(new_filepath, data_to_save, fmt='%.1f')
-
-    # ================ OUTPUT SUMMARY INFORMATION ================
-    # Summary information
-    summary_info = {
-        'Total Picks Processed': total_number_of_picks,
-        'Total Time (min)': total_time_min,
-        '2D Histogram Bin Size (nm)': hist_2D_bin_size,
-        'Mean Amount of Photons': photons_mean,
-        'Mean Background Signal': np.mean(bkg_concat, axis=None),
-    }
-
-    for key in summary_info.keys():
-        update_pkl(main_folder, key, summary_info[key])
-
-    # Elegant printing of the summary
-    print('\n' + '='*23 + '📊 STEP 2 SUMMARY 📊' + '='*23)
-    print(f'   Total Picks Processed: {total_number_of_picks}')
-    print(f'   Total Time (min): {total_time_min:.1f}')
-    print(f'   2D Histogram Bin Size (nm): {hist_2D_bin_size:.2f}')
-    print(f'   Mean Amount of Photons: {photons_mean:.1f}')
-    print(f'   Mean Background Signal: {np.mean(bkg_concat, axis=None):.1f}')
-    if len(tons_all) > 0:
-        print(f'   Total Binding Events: {len(tons_all)}')
-        print(f'   Mean Binding Time (s): {np.mean(tons_all):.2f}')
-        print(f'   Mean SNR: {np.mean(SNR_filtered) if len(SNR_filtered) > 0 else 0:.1f}')
-        print(f'   Mean SBR: {np.mean(SBR_filtered) if len(SBR_filtered) > 0 else 0:.1f}')
-    print(f'   Data analysis and plotting completed.')
-    print('='*70)
-    print('\nDone with STEP 2.')
-
-    # ================ RETURN RESULTS FOR CONSOLIDATION ================
-    results = {
-        'total_picks_processed': total_number_of_picks,
-        'total_time_minutes': total_time_min,
-        'histogram_bin_size_nm': hist_2D_bin_size,
-        'mean_photons': photons_mean,
-        'mean_background': np.mean(bkg_concat, axis=None),
-        'total_localizations': len(photons_concat),
-        'mean_locs_per_pick': np.mean(locs_of_picked),
-        'std_locs_per_pick': np.std(locs_of_picked)
-    }
-    
-    # Add kinetics data if available
-    if len(tons_all) > 0:
-        results.update({
-            'total_binding_events': len(tons_all),
-            'mean_binding_time_seconds': np.mean(tons_all),
-            'std_binding_time_seconds': np.std(tons_all),
-            'mean_unbinding_time_seconds': np.mean(toffs_all) if len(toffs_all) > 0 else 0,
-            'std_unbinding_time_seconds': np.std(toffs_all) if len(toffs_all) > 0 else 0,
-            'mean_snr': np.mean(SNR_filtered) if len(SNR_filtered) > 0 else 0,
-            'mean_sbr': np.mean(SBR_filtered) if len(SBR_filtered) > 0 else 0,
-            'binding_time_slope': slope if 'slope' in locals() else 0,
-            'binding_time_intercept': intercept if 'intercept' in locals() else 0
-        })
-    
-    # Add relative positions statistics if available
-    if len(positions_concat_origami) > 0:
-        results.update({
-            'mean_binding_site_distance_nm': np.mean(positions_concat_origami),
-            'std_binding_site_distance_nm': np.std(positions_concat_origami)
-        })
-    
-    if NP_flag and len(positions_concat_NP) > 0:
-        results.update({
-            'mean_np_distance_nm': np.mean(positions_concat_NP),
-            'std_np_distance_nm': np.std(positions_concat_NP)
-        })
-    
-    return results
         
 #####################################################################
 #####################################################################
@@ -1166,6 +773,12 @@ if __name__ == '__main__':
     exp_time = 0.1 # in s
     plot_flag = True
     
+    # Add missing parameters for position averaging
+    photons_threshold = 20  # Photon threshold for binding events
+    mask_level = 3          # Mask level for noise filtering
+    mask_singles = True     # Mask single-frame events
+    
     process_dat_files(number_of_frames, exp_time, working_folder,
                           docking_sites, NP_flag, pixel_size, pick_size, 
-                          radius_of_pick_to_average, th, plot_flag, True)
+                          radius_of_pick_to_average, th, plot_flag, True, 
+                          photons_threshold, mask_level, mask_singles)

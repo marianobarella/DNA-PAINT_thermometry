@@ -116,6 +116,113 @@ def estimate_binding_unbinding_times(exp_time, rango, working_folder, \
     for parameter in parameters.keys():
         update_pkl(path, parameter, parameters[parameter])
 
+    # ================ PROCESS PER-SITE DATA IF AVAILABLE ================
+    # Check if per-site combined data folder exists
+    per_site_folder = os.path.join(working_folder, 'per_site_combined')
+    per_site_results = {}
+    
+    # Always show per-site folder check (not just in verbose mode)
+    print(f'\nChecking for per-site combined data at: {per_site_folder}')
+    folder_exists = os.path.exists(per_site_folder)
+    print(f'Per-site folder exists: {folder_exists}')
+    
+    if folder_exists:
+        try:
+            files_in_per_site = os.listdir(per_site_folder)
+            t_on_files = [f for f in files_in_per_site if f.startswith('t_on_site_')]
+            print(f'Found {len(t_on_files)} per-site t_on files: {t_on_files}')
+        except Exception as e:
+            print(f'Error listing per-site folder contents: {e}')
+    
+    if os.path.exists(per_site_folder):
+        if verbose_flag:
+            print('\nFound per-site combined data folder. Processing individual sites...')
+        
+        # Create per-site results subfolder
+        per_site_data_folder = manage_save_directory(step4_data_folder, 'per_site')
+        per_site_figures_folder = manage_save_directory(step4_figures_folder, 'per_site')
+        
+        # Get list of sites from per-site files
+        per_site_files = os.listdir(per_site_folder)
+        site_numbers = set()
+        for f in per_site_files:
+            if 't_on_site_' in f:
+                site_num = f.split('t_on_site_')[1].split('.dat')[0]
+                site_numbers.add(int(site_num))
+        
+        site_numbers = sorted(site_numbers)
+        
+        # Process each site using exact same logic as ALL data
+        for site_num in site_numbers:
+            try:
+                # Find site-specific files
+                site_t_on_file = f't_on_site_{site_num}.dat'
+                site_t_off_file = f't_off_site_{site_num}.dat'
+                
+                site_t_on_path = os.path.join(per_site_folder, site_t_on_file)
+                site_t_off_path = os.path.join(per_site_folder, site_t_off_file)
+                
+                # Check if both files exist
+                if os.path.exists(site_t_on_path) and os.path.exists(site_t_off_path):
+                    if verbose_flag:
+                        print(f'  Processing site {site_num}...')
+                    
+                    # Use exact same MLE logic as ALL data
+                    site_solutions_on = find_best_tau_using_MLE(site_t_on_path, rango, \
+                                                                exp_time, initial_params, \
+                                                                likelihood_err_param, \
+                                                                hyper_exponential_flag, \
+                                                                opt_display_flag, 1, verbose_flag, per_site_figures_folder, f'site_{site_num}_tau_on', plot_flag=False)
+                    
+                    site_solutions_off = find_best_tau_using_MLE(site_t_off_path, rango, \
+                                                                exp_time, [230, 2, 1], \
+                                                                likelihood_err_param, \
+                                                                True, \
+                                                                opt_display_flag, 1, verbose_flag, per_site_figures_folder, f'site_{site_num}_tau_off', plot_flag=False)
+                    
+                    # Store per-site results
+                    per_site_results[f'site_{site_num}'] = {
+                        'tau_long': site_solutions_on[0][0],
+                        'tau_long_error_plus': site_solutions_on[0][1],
+                        'tau_long_error_minus': site_solutions_on[0][2],
+                        'tau_long_off': site_solutions_off[0][0],
+                        'tau_long_off_error_plus': site_solutions_off[0][1],
+                        'tau_long_off_error_minus': site_solutions_off[0][2],
+                        'ratio_on': site_solutions_on[2][0],
+                        'ratio_off': site_solutions_off[2][0]
+                    }
+                    
+                    # Add hyperexponential results if applicable
+                    if hyper_exponential_flag:
+                        per_site_results[f'site_{site_num}'].update({
+                            'tau_short': site_solutions_on[1][0],
+                            'tau_short_error_plus': site_solutions_on[1][1],
+                            'tau_short_error_minus': site_solutions_on[1][2],
+                            'tau_short_off': site_solutions_off[1][0],
+                            'tau_short_off_error_plus': site_solutions_off[1][1],
+                            'tau_short_off_error_minus': site_solutions_off[1][2]
+                        })
+                    
+                    if verbose_flag:
+                        print(f'    Site {site_num}: tau_long = {site_solutions_on[0][0]:.3f} s')
+                        
+                else:
+                    if verbose_flag:
+                        print(f'  Warning: Missing files for site {site_num}')
+                        
+            except Exception as e:
+                if verbose_flag:
+                    print(f'  Error processing site {site_num}: {e}')
+        
+        # Save per-site results to pickle file
+        if per_site_results:
+            per_site_dict_path = os.path.join(per_site_data_folder, "MLE_parameters_per_site.pkl")
+            with open(per_site_dict_path, 'wb') as f:
+                pickle.dump(per_site_results, f)
+            
+            if verbose_flag:
+                print(f'  Per-site results saved to: {per_site_dict_path}')
+                print(f'  Processed {len(per_site_results)} sites successfully')
 
     # ================ SAVE PARAMETERS TO PICKLE FILE ================
     dict_path = os.path.join(step4_data_folder, "MLE_parameters.pkl")
@@ -134,6 +241,11 @@ def estimate_binding_unbinding_times(exp_time, rango, working_folder, \
         if hyper_exponential_flag and solutions_on[1][0] > 0:
             print(f'   Additional info: tau_short = {solutions_on[1][0]:.3f} s, ratio = {solutions_on[2][0]:.3f}')
         print(f'   Full results saved to: {dict_path}')
+        if per_site_results:
+            print(f'   Per-site results saved to: {per_site_dict_path}')
+            print(f'   Per-site summary:')
+            for site_key, site_data in per_site_results.items():
+                print(f'     {site_key}: tau_long = {site_data["tau_long"]:.3f} s')
         print('='*60)
     print('\nDone with STEP 4.')
 
@@ -159,6 +271,11 @@ def estimate_binding_unbinding_times(exp_time, rango, working_folder, \
             'tau_short_off_error_plus': solutions_off[1][1],
             'tau_short_off_error_minus': solutions_off[1][2]
         })
+    
+    # Add per-site results if available
+    if per_site_results:
+        results['per_site_data'] = per_site_results
+        results['per_site_count'] = len(per_site_results)
     
     return results
 

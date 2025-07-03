@@ -172,7 +172,7 @@ def run_analysis(selected_file, working_folder, step, params):
         # ================ RUN STEP 2 ================
         step2_results = step2.process_dat_files(number_of_frames, exp_time, step2_working_folder, \
                               docking_sites, NP_flag, pixel_size, pick_size, \
-                              radius_of_pick_to_average, th, plot_flag, verbose_flag)
+                              radius_of_pick_to_average, th, plot_flag, verbose_flag, photons_threshold, mask_level, mask_singles)
         if step2_results:
             results_dict.update({f'step2_{k}': v for k, v in step2_results.items()})
     else:
