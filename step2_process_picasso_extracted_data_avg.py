@@ -503,7 +503,12 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
             # ================ SAVE TRACES PER SITE ================
             for index, key in enumerate(all_traces_per_site_per_pick.keys()):
                 site_trace = all_traces_per_site_per_pick[key]
-                dist_value = 0 if not NP_flag else round(matrix_distance[0, index+1], 2)
+                # Handle NaN values in distance matrix - set to 0 if NaN or not available
+                if not NP_flag:
+                    dist_value = 0
+                else:
+                    raw_dist = matrix_distance[0, index+1]
+                    dist_value = 0 if np.isnan(raw_dist) else round(raw_dist, 2)
                 new_filename = f'TRACE_pick_{i}_site_{int(key)}_dist_{dist_value}.dat'
                 new_filepath = os.path.join(traces_per_site_folder, new_filename)
                 np.savetxt(new_filepath, site_trace, fmt='%05d')
@@ -533,7 +538,9 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
                     photons_per_site_folder = manage_save_directory(data_folder, 'photons_per_site')
                     
                     # Save per-site kinetics files
-                    base_name = f'pick_{i}_site_{int(key)}_dist_{int(dist_value)}'
+                    # Ensure dist_value is valid for integer conversion
+                    safe_dist_value = 0 if np.isnan(dist_value) else int(dist_value)
+                    base_name = f'pick_{i}_site_{int(key)}_dist_{safe_dist_value}'
                     
                     if len(site_tons) > 0:
                         np.savetxt(os.path.join(ton_per_site_folder, f'ton_{base_name}.dat'), 
