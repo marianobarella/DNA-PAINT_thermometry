@@ -48,7 +48,7 @@ plt.ioff()
 # ================ MAIN FUNCTION FOR BINDING/UNBINDING TIME ESTIMATION ================
 def estimate_binding_unbinding_times(exp_time, rango, working_folder, \
                                     initial_params, likelihood_err_param, \
-                                    opt_display_flag, hyper_exponential_flag, verbose_flag):
+                                    opt_display_flag, hyper_exponential_flag, verbose_flag, use_dbscan=False):
     
     print('\nStarting STEP 4.')
     
@@ -72,13 +72,29 @@ def estimate_binding_unbinding_times(exp_time, rango, working_folder, \
         print(f'Debug: step4_figures_folder = {step4_figures_folder}')
     
     # ================ LOCATE AND LOAD DATA FILES ================
-    list_of_files = os.listdir(working_folder)
+    # Determine the correct folder and file names based on method
+    if use_dbscan:
+        # For DBSCAN: look in dbscan_data subfolder
+        dbscan_folder = os.path.join(working_folder, 'dbscan_data')
+        if os.path.exists(dbscan_folder):
+            data_folder = dbscan_folder
+        else:
+            raise FileNotFoundError(f"DBSCAN data folder not found: {dbscan_folder}")
+        t_on_datafile = 't_on.dat'
+        t_off_datafile = 't_off.dat'
+    else:
+        # For standard method: use working_folder directly
+        data_folder = working_folder
+        t_on_datafile = 't_on.dat'
+        t_off_datafile = 't_off.dat'
     
-    t_on_datafile = [f for f in list_of_files if re.search('t_on', f)][0]
-    t_off_datafile = [f for f in list_of_files if re.search('t_off', f)][0]
-
-    t_on_full_filepath = os.path.join(working_folder, t_on_datafile)
-    t_off_full_filepath = os.path.join(working_folder, t_off_datafile)
+    t_on_full_filepath = os.path.join(data_folder, t_on_datafile)
+    t_off_full_filepath = os.path.join(data_folder, t_off_datafile)
+    
+    # Check if files exist
+    if not os.path.exists(t_on_full_filepath) or not os.path.exists(t_off_full_filepath):
+        method_name = "DBSCAN" if use_dbscan else "standard"
+        raise FileNotFoundError(f"Could not find {method_name} kinetics files in {data_folder}")
 
     ########################################################################
 
@@ -117,8 +133,8 @@ def estimate_binding_unbinding_times(exp_time, rango, working_folder, \
         update_pkl(path, parameter, parameters[parameter])
 
     # ================ PROCESS PER-SITE DATA IF AVAILABLE ================
-    # Check if per-site combined data folder exists
-    per_site_folder = os.path.join(working_folder, 'per_site_combined')
+    # Check if per-site combined data folder exists (in the same data folder as the main files)
+    per_site_folder = os.path.join(data_folder, 'per_site_combined')
     per_site_results = {}
     
     # Always show per-site folder check (not just in verbose mode)
@@ -146,16 +162,21 @@ def estimate_binding_unbinding_times(exp_time, rango, working_folder, \
         per_site_files = os.listdir(per_site_folder)
         site_numbers = set()
         for f in per_site_files:
-            if 't_on_site_' in f:
-                site_num = f.split('t_on_site_')[1].split('.dat')[0]
-                site_numbers.add(int(site_num))
+            site_pattern = f't_on_site_'
+            if site_pattern in f and f.endswith('.dat'):
+                # Extract site number (no suffix needed since we use separate folders)
+                site_num = f.split(site_pattern)[1].split('.dat')[0]
+                try:
+                    site_numbers.add(int(site_num))
+                except ValueError:
+                    continue  # Skip files with invalid site numbers
         
         site_numbers = sorted(site_numbers)
         
         # Process each site using exact same logic as ALL data
         for site_num in site_numbers:
             try:
-                # Find site-specific files
+                # Find site-specific files (no suffix needed since we use separate folders)
                 site_t_on_file = f't_on_site_{site_num}.dat'
                 site_t_off_file = f't_off_site_{site_num}.dat'
                 
@@ -546,7 +567,7 @@ def find_best_tau_using_MLE(full_filepath, rango, exp_time, initial_params, \
         ax.set_ylabel('Normalized frequency', fontsize=20)
         ax.set_yscale('log')
         ax.set_axisbelow(True)
-        ax.set_xlim([0, 10])
+        ax.set_xlim(rango)
         ax.set_ylim([1e-4, 10])
 
         plt.legend(loc='upper right', prop={'size':12})

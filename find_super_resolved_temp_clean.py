@@ -113,6 +113,7 @@ def run_analysis(selected_file, working_folder, step, params):
     lpy_filter = params.get('lpy_filter', 0)
     mask_singles = params.get('mask_singles', 0)
     use_position_averaging = params.get('use_position_averaging', False)  # New flag for position averaging
+    use_dbscan = params.get('use_dbscan', False)  # New flag for DBSCAN clustering
     photon_threshold_flag = False
 
     # ================ CONDITIONAL STEP2 IMPORT ================
@@ -147,6 +148,7 @@ def run_analysis(selected_file, working_folder, step, params):
     print(f'   Exposure Time: {exp_time}s | Frames: {number_of_frames} | Docking Sites: {docking_sites}')
     print(f'   Photon Threshold: {photons_threshold} | Background: {background_level} | Mask Level: {mask_level}')
     print(f'   Pixel Size: {pixel_size*1000:.0f}nm | Pick Size: {pick_size}px | LP Filters: {lpx_filter}/{lpy_filter}')
+    print(f'   Position Averaging: {use_position_averaging} | DBSCAN Clustering: {use_dbscan}')
     if hyper_exponential_flag:
         print(f'   Mode: Hyper-Exponential | Range: {rango} | Error: {likelihood_err_param}')
     else:
@@ -172,7 +174,7 @@ def run_analysis(selected_file, working_folder, step, params):
         # ================ RUN STEP 2 ================
         step2_results = step2.process_dat_files(number_of_frames, exp_time, step2_working_folder, \
                               docking_sites, NP_flag, pixel_size, pick_size, \
-                              radius_of_pick_to_average, th, plot_flag, verbose_flag, photons_threshold, mask_level, mask_singles)
+                              radius_of_pick_to_average, th, plot_flag, verbose_flag, photons_threshold, mask_level, mask_singles, use_dbscan)
         if step2_results:
             results_dict.update({f'step2_{k}': v for k, v in step2_results.items()})
     else:
@@ -235,7 +237,7 @@ def run_analysis(selected_file, working_folder, step, params):
                 # Pass the kinetics folder to Step 4, but it will create its own analysis/step4 structure
                 step4_results = step4.estimate_binding_unbinding_times(exp_time, rango, step4_working_folder,
                                                 initial_params, likelihood_err_param,
-                                                opt_display_flag, hyper_exponential_flag, verbose_flag)
+                                                opt_display_flag, hyper_exponential_flag, verbose_flag, use_dbscan)
                 if step4_results:
                     results_dict.update({f'step4_{k}': v for k, v in step4_results.items()})
             except FileNotFoundError as e:

@@ -52,6 +52,7 @@ from auxiliary_functions import detect_peaks, detect_peaks_improved, get_peak_de
     perpendicular_distance, manage_save_directory, plot_vs_time_with_hist, update_pkl, \
     calculate_tau_on_times_average
 from sklearn.mixture import GaussianMixture
+from sklearn.cluster import DBSCAN
 import time
 from auxiliary_functions_gaussian import plot_gaussian_2d
 import scipy
@@ -67,7 +68,7 @@ bkg_color = cmap(0)
 
 def process_dat_files(number_of_frames, exp_time, working_folder,
                       docking_sites, NP_flag, pixel_size, pick_size, 
-                      radius_of_pick_to_average, th, plot_flag, verbose_flag, photons_threshold, mask_level, mask_singles):
+                      radius_of_pick_to_average, th, plot_flag, verbose_flag, photons_threshold, mask_level, mask_singles, use_dbscan=False):
     
     print('\nStarting STEP 2.')
     
@@ -308,16 +309,137 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
         x_hist_centers = x_hist[:-1] + x_hist_step/2
         y_hist_centers = y_hist[:-1] + y_hist_step/2
         
-        # ================ IMPROVED PEAK DETECTION ================
-        # Use improved peak detection function from auxiliary_functions
+        # ================ IMPROVED PEAK DETECTION OR DBSCAN CLUSTERING ================
         min_distance_nm = 15  # Minimum 15nm separation between peaks
         
-        # Call the function we created instead of duplicating code
-        peak_coords = detect_peaks_improved(
-            x_position_of_picked, y_position_of_picked, 
-            hist_bounds, expected_peaks=docking_sites, 
-            min_distance_nm=min_distance_nm
-        )
+        # Calculate analysis radius early for use in both DBSCAN and traditional methods
+        analysis_radius = radius_of_pick_to_average*pixel_size
+        
+        if use_dbscan:
+            # ================ DBSCAN CLUSTERING ================
+            # Convert positions to array for DBSCAN
+            positions = np.column_stack((x_position_of_picked, y_position_of_picked))
+            
+            # DBSCAN parameters - use GUI-relevant values for better adaptation
+            # Use analysis radius as base for clustering, but make it slightly smaller for tight clustering
+            analysis_radius_um = radius_of_pick_to_average * pixel_size  # Convert to micrometers
+            eps_um = analysis_radius_um * 0.6  # 60% of analysis radius for tighter clustering
+            
+            # Adaptive min_samples based on expected density and docking sites
+            expected_points_per_site = max(3, len(positions) // (docking_sites * 2))
+            min_samples = max(2, min(expected_points_per_site // 2, 5))  # Between 2-5 points
+            
+            if verbose_flag:
+                print(f'DBSCAN parameters: eps={eps_um*1000:.1f}nm, min_samples={min_samples}')
+            
+            # Apply DBSCAN
+            dbscan = DBSCAN(eps=eps_um, min_samples=min_samples)
+            cluster_labels = dbscan.fit_predict(positions)
+            
+            # Get cluster centers (excluding noise points labeled as -1)
+            peak_coords = []
+            unique_labels = np.unique(cluster_labels)
+            valid_labels = unique_labels[unique_labels != -1]  # Remove noise label
+            
+            for label in valid_labels:
+                cluster_mask = cluster_labels == label
+                cluster_points = positions[cluster_mask]
+                # Use centroid as peak coordinate
+                centroid_x = np.mean(cluster_points[:, 0])
+                centroid_y = np.mean(cluster_points[:, 1])
+                peak_coords.append((centroid_x, centroid_y))
+            
+            # Sort by cluster size (largest first) to prioritize main clusters
+            if len(peak_coords) > docking_sites:
+                cluster_sizes = []
+                for label in valid_labels:
+                    cluster_mask = cluster_labels == label
+                    cluster_sizes.append(np.sum(cluster_mask))
+                
+                # Get indices sorted by cluster size (descending)
+                sorted_indices = np.argsort(cluster_sizes)[::-1]
+                peak_coords = [peak_coords[i] for i in sorted_indices[:docking_sites]]
+            
+            if verbose_flag:
+                print(f'DBSCAN found {len(valid_labels)} clusters, using top {len(peak_coords)} peaks')
+                
+            # Convert peak_coords to arrays for consistency with original code
+            cm_binding_sites_x = np.array([peak[0] for peak in peak_coords])
+            cm_binding_sites_y = np.array([peak[1] for peak in peak_coords])
+            
+            # Calculate standard deviations for each DBSCAN cluster
+            cm_std_dev_binding_sites_x = np.array([])
+            cm_std_dev_binding_sites_y = np.array([])
+            
+            for idx, label in enumerate(valid_labels[:len(peak_coords)]):
+                cluster_mask = cluster_labels == label
+                cluster_points = positions[cluster_mask]
+                std_x = np.std(cluster_points[:, 0], ddof=1) if len(cluster_points) > 1 else 0.01
+                std_y = np.std(cluster_points[:, 1], ddof=1) if len(cluster_points) > 1 else 0.01
+                cm_std_dev_binding_sites_x = np.append(cm_std_dev_binding_sites_x, std_x)
+                cm_std_dev_binding_sites_y = np.append(cm_std_dev_binding_sites_y, std_y)
+            
+            # ================ DBSCAN VISUALIZATION ================
+            if plot_flag:
+                # Create DBSCAN clustering visualization
+                plt.figure(figsize=(10, 8))
+                
+                # Create a colormap for clusters
+                colors = plt.cm.tab10(np.linspace(0, 1, len(valid_labels)))
+                
+                # Plot each cluster with different colors
+                for idx, label in enumerate(valid_labels):
+                    cluster_mask = cluster_labels == label
+                    cluster_points = positions[cluster_mask]
+                    plt.scatter(cluster_points[:, 0], cluster_points[:, 1], 
+                              c=[colors[idx]], label=f'Cluster {label}', alpha=0.7, s=20)
+                
+                # Plot noise points in black
+                noise_mask = cluster_labels == -1
+                if np.any(noise_mask):
+                    noise_points = positions[noise_mask]
+                    plt.scatter(noise_points[:, 0], noise_points[:, 1], 
+                              c='black', label='Noise', alpha=0.5, s=10, marker='.')
+                
+                # Plot cluster centers as large stars
+                for idx, (center_x, center_y) in enumerate(peak_coords):
+                    plt.scatter(center_x, center_y, c='red', marker='*', 
+                              s=200, edgecolors='white', linewidth=2, 
+                              label='Centers' if idx == 0 else "", zorder=10)
+                
+                # Add analysis radius circles around centers
+                for center_x, center_y in peak_coords:
+                    circle = plt.Circle((center_x, center_y), analysis_radius, 
+                                      fill=False, color='red', linestyle='--', alpha=0.8)
+                    plt.gca().add_patch(circle)
+                
+                plt.xlabel('X position (μm)')
+                plt.ylabel('Y position (μm)')
+                plt.title(f'DBSCAN - Pick {i:02d}\n'
+                         f'eps={eps_um:.3f}μm, min_samples={min_samples}, '
+                         f'{len(valid_labels)} clusters found')
+                plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+                plt.grid(True, alpha=0.3)
+                plt.axis('equal')
+                plt.tight_layout()
+                
+                # Save the plot
+                dbscan_folder = manage_save_directory(figures_per_pick_folder, 'dbscan_clustering')
+                figure_name = f'dbscan_clustering_pick_{i:02d}'
+                figure_path = os.path.join(dbscan_folder, f'{figure_name}.png')
+                plt.savefig(figure_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                
+                if verbose_flag:
+                    print(f'DBSCAN plot saved: {figure_path}')
+        else:
+            # ================ ORIGINAL IMPROVED PEAK DETECTION ================
+            # Call the function we created instead of duplicating code
+            peak_coords = detect_peaks_improved(
+                x_position_of_picked, y_position_of_picked, 
+                hist_bounds, expected_peaks=docking_sites, 
+                min_distance_nm=min_distance_nm
+            )
         
         total_peaks_found = len(peak_coords)
         docking_sites_temp = min(total_peaks_found, docking_sites)
@@ -326,12 +448,12 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
         peaks_flag = total_peaks_found > 0
         
         # ================ INITIALIZE BINDING SITE ARRAYS ================
-        # Initialize arrays for binding sites
-        analysis_radius = radius_of_pick_to_average*pixel_size
-        cm_binding_sites_x = np.array([])
-        cm_binding_sites_y = np.array([])
-        cm_std_dev_binding_sites_x = np.array([])
-        cm_std_dev_binding_sites_y = np.array([])
+        # Initialize arrays for binding sites (only if not already set by DBSCAN)
+        if not use_dbscan:
+            cm_binding_sites_x = np.array([])
+            cm_binding_sites_y = np.array([])
+            cm_std_dev_binding_sites_x = np.array([])
+            cm_std_dev_binding_sites_y = np.array([])
         all_traces_per_pick = np.zeros(number_of_frames)
         inv_cov_init = []
         
@@ -657,44 +779,53 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
     
     # ================ SAVE OVERALL KINETICS DATA TO FILES ================
     # After all picks are processed, save the overall kinetics data first
-    print(f"\n📊 Saving overall kinetics data...")
+    print(f"\nSaving overall kinetics data...")
+    
+    # Create method-specific folder structure
+    if use_dbscan:
+        dbscan_kinetics_folder = manage_save_directory(kinetics_folder, 'dbscan_data')
+        save_kinetics_folder = dbscan_kinetics_folder
+        method_suffix = ""  # No suffix needed since we have separate folder
+    else:
+        save_kinetics_folder = kinetics_folder
+        method_suffix = ""
     
     # Save overall t_on and t_off data
     if len(tons_all) > 0:
-        ton_filepath = os.path.join(kinetics_folder, 't_on.dat')
+        ton_filepath = os.path.join(save_kinetics_folder, f't_on{method_suffix}.dat')
         np.savetxt(ton_filepath, tons_all, fmt='%.3f')
         
-        toff_filepath = os.path.join(kinetics_folder, 't_off.dat')
+        toff_filepath = os.path.join(save_kinetics_folder, f't_off{method_suffix}.dat')
         np.savetxt(toff_filepath, toffs_all, fmt='%.3f')
         
         # Save other overall kinetics parameters
-        tstarts_filepath = os.path.join(kinetics_folder, 't_starts.dat')
+        tstarts_filepath = os.path.join(save_kinetics_folder, f't_starts{method_suffix}.dat')
         np.savetxt(tstarts_filepath, tstarts_all, fmt='%.3f')
         
-        SNR_filepath = os.path.join(kinetics_folder, 'SNR.dat')
+        SNR_filepath = os.path.join(save_kinetics_folder, f'SNR{method_suffix}.dat')
         np.savetxt(SNR_filepath, SNR_all, fmt='%.3f')
         
-        SBR_filepath = os.path.join(kinetics_folder, 'SBR.dat')
+        SBR_filepath = os.path.join(save_kinetics_folder, f'SBR{method_suffix}.dat')
         np.savetxt(SBR_filepath, SBR_all, fmt='%.3f')
         
-        sum_photons_filepath = os.path.join(kinetics_folder, 'sum_photons.dat')
+        sum_photons_filepath = os.path.join(save_kinetics_folder, f'sum_photons{method_suffix}.dat')
         np.savetxt(sum_photons_filepath, sum_photons_all, fmt='%.3f')
         
-        avg_photons_filepath = os.path.join(kinetics_folder, 'avg_photons.dat')
+        avg_photons_filepath = os.path.join(save_kinetics_folder, f'avg_photons{method_suffix}.dat')
         np.savetxt(avg_photons_filepath, avg_photons_all, fmt='%.3f')
         
-        print(f"✅ Overall kinetics data saved: {len(tons_all):,} events")
+        print(f"Overall kinetics data saved: {len(tons_all):,} events")
         print(f"   t_on.dat: {ton_filepath}")
         print(f"   t_off.dat: {toff_filepath}")
     else:
-        print("⚠️  No overall kinetics data to save!")
+        print("Warning: No overall kinetics data to save!")
     
     # ================ SAVE PER-SITE KINETICS DATA TO FILES ================
     # After all picks are processed, save the collected per-site data
-    print(f"\n📊 Saving per-site kinetics data...")
+    print(f"\nSaving per-site kinetics data...")
     
-    # Create per-site combined folder in kinetics_data
-    per_site_combined_folder = manage_save_directory(kinetics_folder, 'per_site_combined')
+    # Create per-site combined folder in appropriate kinetics folder
+    per_site_combined_folder = manage_save_directory(save_kinetics_folder, 'per_site_combined')
     
     # Save data for each site
     for site_rank in tons_per_site.keys():
@@ -736,7 +867,7 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
             if verbose_flag:
                 print(f"   Site {site_rank}: No events to save (empty)")
     
-    print(f"✅ Per-site data saved to: {per_site_combined_folder}")
+    print(f"Per-site data saved to: {per_site_combined_folder}")
     
     plt.close()
         

@@ -132,35 +132,38 @@ class Ui_Parameters(object):
         self.checkPlot = QtWidgets.QCheckBox(parent=self.groupBox_2)
         self.checkPlot.setObjectName("checkPlot")
         self.formLayout.setWidget(1, QtWidgets.QFormLayout.ItemRole.LabelRole, self.checkPlot)
+        self.checkDBSCAN = QtWidgets.QCheckBox(parent=self.groupBox_2)
+        self.checkDBSCAN.setObjectName("checkDBSCAN")
+        self.formLayout.setWidget(2, QtWidgets.QFormLayout.ItemRole.LabelRole, self.checkDBSCAN)
         self.exposureTimeLabel = QtWidgets.QLabel(parent=self.groupBox_2)
         self.exposureTimeLabel.setObjectName("exposureTimeLabel")
-        self.formLayout.setWidget(2, QtWidgets.QFormLayout.ItemRole.LabelRole, self.exposureTimeLabel)
+        self.formLayout.setWidget(3, QtWidgets.QFormLayout.ItemRole.LabelRole, self.exposureTimeLabel)
         self.pixelSizeLabel = QtWidgets.QLabel(parent=self.groupBox_2)
         self.pixelSizeLabel.setObjectName("pixelSizeLabel")
-        self.formLayout.setWidget(3, QtWidgets.QFormLayout.ItemRole.LabelRole, self.pixelSizeLabel)
+        self.formLayout.setWidget(4, QtWidgets.QFormLayout.ItemRole.LabelRole, self.pixelSizeLabel)
         self.sizeToAverageLabel = QtWidgets.QLabel(parent=self.groupBox_2)
         self.sizeToAverageLabel.setObjectName("sizeToAverageLabel")
-        self.formLayout.setWidget(4, QtWidgets.QFormLayout.ItemRole.LabelRole, self.sizeToAverageLabel)
+        self.formLayout.setWidget(5, QtWidgets.QFormLayout.ItemRole.LabelRole, self.sizeToAverageLabel)
         self.sitesLabel = QtWidgets.QLabel(parent=self.groupBox_2)
         self.sitesLabel.setObjectName("sitesLabel")
-        self.formLayout.setWidget(5, QtWidgets.QFormLayout.ItemRole.LabelRole, self.sitesLabel)
+        self.formLayout.setWidget(6, QtWidgets.QFormLayout.ItemRole.LabelRole, self.sitesLabel)
         self.exposure_time = QtWidgets.QDoubleSpinBox(parent=self.groupBox_2)
         self.exposure_time.setProperty("value", 0.1)
         self.exposure_time.setObjectName("exposure_time")
-        self.formLayout.setWidget(2, QtWidgets.QFormLayout.ItemRole.FieldRole, self.exposure_time)
+        self.formLayout.setWidget(3, QtWidgets.QFormLayout.ItemRole.FieldRole, self.exposure_time)
         self.pixel_size = QtWidgets.QSpinBox(parent=self.groupBox_2)
         self.pixel_size.setMaximum(1000000)
         self.pixel_size.setProperty("value", 130)
         self.pixel_size.setObjectName("pixel_size")
-        self.formLayout.setWidget(3, QtWidgets.QFormLayout.ItemRole.FieldRole, self.pixel_size)
+        self.formLayout.setWidget(4, QtWidgets.QFormLayout.ItemRole.FieldRole, self.pixel_size)
         self.size_to_average = QtWidgets.QDoubleSpinBox(parent=self.groupBox_2)
         self.size_to_average.setProperty("value", 0.2)
         self.size_to_average.setObjectName("size_to_average")
-        self.formLayout.setWidget(4, QtWidgets.QFormLayout.ItemRole.FieldRole, self.size_to_average)
+        self.formLayout.setWidget(5, QtWidgets.QFormLayout.ItemRole.FieldRole, self.size_to_average)
         self.docking_sites = QtWidgets.QSpinBox(parent=self.groupBox_2)
         self.docking_sites.setProperty("value", 3)
         self.docking_sites.setObjectName("docking_sites")
-        self.formLayout.setWidget(5, QtWidgets.QFormLayout.ItemRole.FieldRole, self.docking_sites)
+        self.formLayout.setWidget(6, QtWidgets.QFormLayout.ItemRole.FieldRole, self.docking_sites)
         self.horizontalLayout.addLayout(self.formLayout)
         self.gridLayout.addWidget(self.groupBox_2, 2, 0, 1, 1)
         self.groupBox_3 = QtWidgets.QGroupBox(parent=self.centralwidget)
@@ -407,7 +410,8 @@ class Ui_Parameters(object):
                 "likelihood_error": lambda: self.likelihood_error.setValue(float(value)),
                 "checkOptimizationDisplay": lambda: self.checkOptimizationDisplay.setChecked(value),
                 "checkHyperExponential": lambda: self.checkHyperExponential.setChecked(value),
-                "use_position_averaging": lambda: self.checkPositionAveraging.setChecked(value)
+                "use_position_averaging": lambda: self.checkPositionAveraging.setChecked(value),
+                "use_dbscan": lambda: self.checkDBSCAN.setChecked(value)
             }
             if parameter in convert_dict:
                 convert_dict[parameter]()
@@ -493,6 +497,8 @@ class Ui_Parameters(object):
         self.checkNP.setText(_translate("Parameters", "Nanoparticle"))
         self.checkPlot.setToolTip(_translate("Parameters", "Check for plots."))
         self.checkPlot.setText(_translate("Parameters", "Plot"))
+        self.checkDBSCAN.setToolTip(_translate("Parameters", "Use DBSCAN clustering instead of peak detection for binding site identification."))
+        self.checkDBSCAN.setText(_translate("Parameters", "Use DBSCAN"))
         self.exposureTimeLabel.setToolTip(_translate("Parameters", "Exposure time of the camera."))
         self.exposureTimeLabel.setText(_translate("Parameters", "Exposure Time (s):"))
         self.pixelSizeLabel.setToolTip(_translate("Parameters", "Pixel size of the camera."))
@@ -579,6 +585,7 @@ class Ui_Parameters(object):
             "pixel_size": self.pixel_size.value(),
             "size_to_average": self.size_to_average.value(),
             "checkPlot": self.checkPlot.isChecked(),
+            "use_dbscan": self.checkDBSCAN.isChecked(),
             
             # Step 3 params
             "mask_singles": self.checkSingles.isChecked(),
