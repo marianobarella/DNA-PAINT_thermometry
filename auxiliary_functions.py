@@ -853,12 +853,15 @@ def calculate_tau_on_times_average(trace, threshold, bkg, exposure_time, mask_le
         
         # ================ CALCULATE AVERAGE POSITIONS ================
         if x_positions is not None and y_positions is not None and frame_numbers is not None:
-            # Find localizations in this time segment
-            event_mask = np.isin(frame_numbers, segment_frames)
+            # Find localizations in this time segment.
+            # Raw frame numbers are floats, but the trace is indexed by integers.
+            # Convert frame_numbers to int to find all corresponding localizations.
+            event_mask = np.isin(frame_numbers.astype(int), segment_frames)
             if np.any(event_mask):
                 avg_x = np.mean(x_positions[event_mask])
                 avg_y = np.mean(y_positions[event_mask])
             else:
+                # This fallback is kept for safety but should not be reached.
                 avg_x = avg_y = np.nan
         else:
             avg_x = avg_y = np.nan
