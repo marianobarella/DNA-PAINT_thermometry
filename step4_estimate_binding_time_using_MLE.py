@@ -317,7 +317,11 @@ def find_best_tau_using_MLE(full_filepath, rango, exp_time, initial_params, \
     if sample_data is not None:
         sample = sample_data
     else:
-        sample = np.loadtxt(full_filepath)
+        try:
+            sample = np.loadtxt(full_filepath, encoding='utf-8')
+        except (UnicodeDecodeError, TypeError):
+            with open(full_filepath, 'r', encoding='utf-8') as f:
+                sample = np.loadtxt(f)
     # numerical approximation of the log_ML function using scipy.optimize
     st = time.time()
 

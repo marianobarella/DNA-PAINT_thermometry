@@ -43,13 +43,13 @@ def save_consolidated_results(results_dict, metadata_dict, working_folder):
     try:
         if os.path.exists(csv_path):
             # Append to existing CSV
-            existing_df = pd.read_csv(csv_path)
+            existing_df = pd.read_csv(csv_path, encoding='utf-8')
             combined_df = pd.concat([existing_df, new_results_df], ignore_index=True)
-            combined_df.to_csv(csv_path, index=False)
+            combined_df.to_csv(csv_path, index=False, encoding='utf-8')
             print(f'Results appended to existing CSV (now {len(combined_df)} rows)')
         else:
             # Create new CSV
-            new_results_df.to_csv(csv_path, index=False)
+            new_results_df.to_csv(csv_path, index=False, encoding='utf-8')
             print(f'New results CSV created with 1 row')
     except PermissionError:
         print(f'\nERROR: Cannot write to {csv_path}')
@@ -75,13 +75,13 @@ def save_consolidated_results(results_dict, metadata_dict, working_folder):
     
     if os.path.exists(metadata_csv_path):
         # Append to existing metadata CSV
-        existing_metadata_df = pd.read_csv(metadata_csv_path)
+        existing_metadata_df = pd.read_csv(metadata_csv_path, encoding='utf-8')
         combined_metadata_df = pd.concat([existing_metadata_df, new_metadata_df], ignore_index=True)
-        combined_metadata_df.to_csv(metadata_csv_path, index=False)
+        combined_metadata_df.to_csv(metadata_csv_path, index=False, encoding='utf-8')
         print(f'Metadata appended to existing CSV (now {len(combined_metadata_df)} rows)')
     else:
         # Create new metadata CSV
-        new_metadata_df.to_csv(metadata_csv_path, index=False)
+        new_metadata_df.to_csv(metadata_csv_path, index=False, encoding='utf-8')
         print(f'New metadata CSV created with 1 row')
     
     print(f'\nResults saved to: {csv_path}')
@@ -200,7 +200,15 @@ def run_analysis(selected_file, working_folder, step, params):
             # ================ RUN ORIGINAL STEP 3 ================
             # Load photons data for Step 3
             photons_file = os.path.join(step2_main_folder, 'kinetics_data', 'PHOTONS.dat')
-            photons = np.loadtxt(photons_file)
+            try:
+                photons = np.loadtxt(photons_file, encoding='utf-8')
+            except UnicodeDecodeError:
+                # Fallback to latin-1 encoding if UTF-8 fails
+                photons = np.loadtxt(photons_file, encoding='latin-1')
+            except ValueError:
+                # Fallback for older numpy versions that don't support encoding parameter
+                with open(photons_file, 'r', encoding='utf-8') as f:
+                    photons = np.loadtxt(f)
             
             step3_results = step3.calculate_kinetics(exp_time, photons_threshold, background_level, 
                                                    photons, working_folder, 'TRACES_ALL.dat', 

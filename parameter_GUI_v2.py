@@ -637,7 +637,7 @@ class Ui_Parameters(object):
                         return
 
                     # Load YAML documents from file
-                    with open(path_yaml, 'r') as file:
+                    with open(path_yaml, 'r', encoding='utf-8') as file:
                         docs = list(yaml.safe_load_all(file))
 
                     print(f"Debug: Processing YAML file: {path_yaml}")

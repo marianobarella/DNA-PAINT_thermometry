@@ -119,35 +119,60 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
     # frame number, used for time estimation
     frame_file = [f for f in list_of_files_origami if re.search('_frame',f)][0]
     frame_filepath = os.path.join(working_folder, frame_file)
-    frame = np.loadtxt(frame_filepath)
+    try:
+        frame = np.loadtxt(frame_filepath, encoding='utf-8')
+    except (UnicodeDecodeError, TypeError):
+        # Fallback for encoding issues or older numpy versions
+        with open(frame_filepath, 'r', encoding='utf-8') as f:
+            frame = np.loadtxt(f)
     
     # photons
     photons_file = [f for f in list_of_files_origami if re.search('_photons',f)][0]
     photons_filepath = os.path.join(working_folder, photons_file)
-    photons = np.loadtxt(photons_filepath)
+    try:
+        photons = np.loadtxt(photons_filepath, encoding='utf-8')
+    except (UnicodeDecodeError, TypeError):
+        with open(photons_filepath, 'r', encoding='utf-8') as f:
+            photons = np.loadtxt(f)
     if NP_flag:
         photons_file_NP = [f for f in list_of_files_NP if re.search('_photons', f)][0]
         photons_filepath_NP = os.path.join(working_folder, photons_file_NP)
-        photons = np.loadtxt(photons_filepath_NP)
+        try:
+            photons = np.loadtxt(photons_filepath_NP, encoding='utf-8')
+        except (UnicodeDecodeError, TypeError):
+            with open(photons_filepath_NP, 'r', encoding='utf-8') as f:
+                photons = np.loadtxt(f)
 
     
     # bkg
     bkg_file = [f for f in list_of_files_origami if re.search('_bkg',f)][0]
     bkg_filepath = os.path.join(working_folder, bkg_file)
-    bkg = np.loadtxt(bkg_filepath)
+    try:
+        bkg = np.loadtxt(bkg_filepath, encoding='utf-8')
+    except (UnicodeDecodeError, TypeError):
+        with open(bkg_filepath, 'r', encoding='utf-8') as f:
+            bkg = np.loadtxt(f)
     
     # xy positions
     # origami
     position_file = [f for f in list_of_files_origami if re.search('_xy',f)][0]
     position_filepath = os.path.join(working_folder, position_file)
-    position = np.loadtxt(position_filepath)
+    try:
+        position = np.loadtxt(position_filepath, encoding='utf-8')
+    except (UnicodeDecodeError, TypeError):
+        with open(position_filepath, 'r', encoding='utf-8') as f:
+            position = np.loadtxt(f)
     x = position[:,0]*pixel_size
     y = position[:,1]*pixel_size
     # NP
     if NP_flag:
         position_file_NP = [f for f in list_of_files_NP if re.search('_xy',f)][0]
         position_filepath_NP = os.path.join(working_folder, position_file_NP)
-        xy_NP = np.loadtxt(position_filepath_NP)
+        try:
+            xy_NP = np.loadtxt(position_filepath_NP, encoding='utf-8')
+        except (UnicodeDecodeError, TypeError):
+            with open(position_filepath_NP, 'r', encoding='utf-8') as f:
+                xy_NP = np.loadtxt(f)
         x_NP = xy_NP[:,0]*pixel_size
         y_NP = xy_NP[:,1]*pixel_size
     
@@ -155,12 +180,20 @@ def process_dat_files(number_of_frames, exp_time, working_folder,
     # origami
     pick_file = [f for f in list_of_files_origami if re.search('_pick_number',f)][0]
     pick_filepath = os.path.join(working_folder, pick_file)
-    pick_list = np.loadtxt(pick_filepath)
+    try:
+        pick_list = np.loadtxt(pick_filepath, encoding='utf-8')
+    except (UnicodeDecodeError, TypeError):
+        with open(pick_filepath, 'r', encoding='utf-8') as f:
+            pick_list = np.loadtxt(f)
     # NP
     if NP_flag:
         pick_file_NP = [f for f in list_of_files_NP if re.search('_pick_number',f)][0]
         pick_filepath_NP = os.path.join(working_folder, pick_file_NP)
-        pick_list_NP = np.loadtxt(pick_filepath_NP)
+        try:
+            pick_list_NP = np.loadtxt(pick_filepath_NP, encoding='utf-8')
+        except (UnicodeDecodeError, TypeError):
+            with open(pick_filepath_NP, 'r', encoding='utf-8') as f:
+                pick_list_NP = np.loadtxt(f)
     
     ##############################################################################
     

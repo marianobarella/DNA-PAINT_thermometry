@@ -97,7 +97,11 @@ def calculate_kinetics(exp_time, photons_threshold, background_level, photons, f
             distance_to_NP = parts[6].split('.')[0]
 
             # Load the data from the file
-            data = np.loadtxt(os.path.join(traces_per_site_file, file_name))
+            try:
+                data = np.loadtxt(os.path.join(traces_per_site_file, file_name), encoding='utf-8')
+            except (UnicodeDecodeError, TypeError):
+                with open(os.path.join(traces_per_site_file, file_name), 'r', encoding='utf-8') as f:
+                    data = np.loadtxt(f)
 
             # Store the data in a nested dictionary
             if pick_nr not in traces_per_pick_and_site:
@@ -108,7 +112,11 @@ def calculate_kinetics(exp_time, photons_threshold, background_level, photons, f
             }
     # ================ LOAD MAIN TRACES DATA ================
     # load data
-    traces = np.loadtxt(traces_file)
+    try:
+        traces = np.loadtxt(traces_file, encoding='utf-8')
+    except (UnicodeDecodeError, TypeError):
+        with open(traces_file, 'r', encoding='utf-8') as f:
+            traces = np.loadtxt(f)
     
     # Validate traces data
     if traces.size == 0:
